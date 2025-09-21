@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NFL Schedule — Apple-like Panels</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">🏈</span>
+      <span class="brand-text">NFL Schedule</span>
+    </div>
+
+    <div class="controls">
+      <button id="prevWeek" class="nav-btn" aria-label="Previous week">‹</button>
+      <label class="week-select">
+        <span>Week</span>
+        <select id="weekSelect" aria-label="Select week"></select>
+      </label>
+      <button id="nextWeek" class="nav-btn" aria-label="Next week">›</button>
+      <button id="refreshBtn" class="refresh-btn" title="Refresh">↻</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="statusBar" class="status-bar">Loading…</div>
+    <section id="grid" class="grid"></section>
+  </main>
+
+  <footer class="app-footer">
+    <span id="seasonLabel"></span>
+    <span>• Data from ESPN (unofficial endpoints)</span>
+  </footer>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
