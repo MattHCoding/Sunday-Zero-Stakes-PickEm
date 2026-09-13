@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAndSavePicks",
+      "Effect": "Allow",
+      "Action": ["dynamodb:Query", "dynamodb:PutItem"],
+      "Resource": "arn:aws:dynamodb:us-east-2:442426890475:table/SundayPickEm-Picks"
+    },
+    {
+      "Sid": "WriteFunctionLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-2:442426890475:log-group:/aws/lambda/SundayPickEm-Api:*"
+    }
+  ]
+}
