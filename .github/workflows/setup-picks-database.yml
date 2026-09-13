@@ -1,0 +1,129 @@
+name: Set up picks database
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/setup-picks-database.yml
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+concurrency:
+  group: setup-picks-database
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    if: github.repository == 'MattHCoding/Sunday-Zero-Stakes-PickEm' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtain temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: arn:aws:iam::442426890475:role/PickEm-GitHub-Deploy
+          aws-region: us-east-2
+          allowed-account-ids: "442426890475"
+          role-duration-seconds: 900
+          role-session-name: PickEm-DatabaseSetup
+          retry-max-attempts: 2
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["dynamodb:CreateTable","dynamodb:DescribeTable","dynamodb:DescribeContinuousBackups","dynamodb:UpdateContinuousBackups","dynamodb:TagResource","dynamodb:ListTagsOfResource"],"Resource":"arn:aws:dynamodb:us-east-2:442426890475:table/SundayPickEm-Picks"}]}
+      - name: Create and verify the picks table
+        shell: bash
+        env:
+          AWS_PAGER: ""
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import time
+
+          TABLE = "SundayPickEm-Picks"
+          REGION = "us-east-2"
+          ARN = "arn:aws:dynamodb:us-east-2:442426890475:table/" + TABLE
+          # One user's picks can be queried together or by season/week prefix.
+          # Runtime convention: pickId = season#week#eventId, with zero-padded week.
+          KEYS = [
+              {"AttributeName": "userId", "KeyType": "HASH"},
+              {"AttributeName": "pickId", "KeyType": "RANGE"},
+          ]
+          ATTRIBUTES = [
+              {"AttributeName": "userId", "AttributeType": "S"},
+              {"AttributeName": "pickId", "AttributeType": "S"},
+          ]
+
+          def aws(operation, *args, allow_missing=False):
+              result = subprocess.run(
+                  ["aws", "dynamodb", operation, "--region", REGION,
+                   "--output", "json", "--no-cli-pager", *args],
+                  capture_output=True, text=True, check=False,
+              )
+              if result.returncode:
+                  if allow_missing and "(ResourceNotFoundException)" in result.stderr:
+                      return None
+                  raise RuntimeError(operation + ": " + result.stderr.strip())
+              return json.loads(result.stdout) if result.stdout.strip() else {}
+
+          existing = aws("describe-table", "--table-name", TABLE, allow_missing=True)
+          if existing is None:
+              aws("create-table", "--cli-input-json", json.dumps({
+                  "TableName": TABLE,
+                  "KeySchema": KEYS,
+                  "AttributeDefinitions": ATTRIBUTES,
+                  "BillingMode": "PAY_PER_REQUEST",
+                  "DeletionProtectionEnabled": True,
+                  "Tags": [
+                      {"Key": "Project", "Value": "Sunday-Zero-Stakes-PickEm"},
+                      {"Key": "ManagedBy", "Value": "GitHubActions"},
+                  ],
+              }))
+              print("Created " + TABLE)
+          else:
+              print("Table already exists; checking configuration without replacing it.")
+
+          subprocess.run(
+              ["aws", "dynamodb", "wait", "table-exists",
+               "--table-name", TABLE, "--region", REGION],
+              check=True, timeout=240,
+          )
+          table = aws("describe-table", "--table-name", TABLE)["Table"]
+          assert table["TableArn"] == ARN, "Unexpected table ARN"
+          assert table["TableStatus"] == "ACTIVE", "Table is not active"
+          assert table["KeySchema"] == KEYS, "Existing table has a different key schema"
+          assert sorted(table["AttributeDefinitions"], key=lambda x: x["AttributeName"]) == sorted(ATTRIBUTES, key=lambda x: x["AttributeName"]), "Unexpected key attribute types"
+          assert table.get("BillingModeSummary", {}).get("BillingMode") == "PAY_PER_REQUEST", "Unexpected billing mode"
+          assert table.get("DeletionProtectionEnabled") is True, "Deletion protection is not enabled"
+
+          aws("update-continuous-backups", "--table-name", TABLE,
+              "--point-in-time-recovery-specification",
+              json.dumps({"PointInTimeRecoveryEnabled": True}))
+          for attempt in range(24):
+              backup = aws("describe-continuous-backups", "--table-name", TABLE)
+              pitr = backup["ContinuousBackupsDescription"].get("PointInTimeRecoveryDescription", {})
+              if pitr.get("PointInTimeRecoveryStatus") == "ENABLED":
+                  break
+              time.sleep(5)
+          else:
+              raise RuntimeError("Point-in-time recovery has not become enabled")
+
+          summary = (
+              "## Picks database ready\n\n"
+              "- Table: SundayPickEm-Picks\n"
+              "- Region: us-east-2 (Ohio)\n"
+              "- Status: ACTIVE\n"
+              "- Billing: pay per request\n"
+              "- Deletion protection: enabled\n"
+              "- Point-in-time recovery: enabled\n"
+              "- Partition key: userId (string)\n"
+              "- Sort key: pickId (string; season#week#eventId)\n\n"
+              "No pick records were read or written. App integration and sign-in are separate steps.\n"
+          )
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(summary)
+          PY
