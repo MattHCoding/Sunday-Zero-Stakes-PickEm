@@ -1,0 +1,40 @@
+name: Deploy picks API function
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/handler.py
+      - backend/deploy_function.py
+      - tests/test_picks_api.py
+      - .github/workflows/deploy-picks-api.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: deploy-picks-api
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.repository == 'MattHCoding/Sunday-Zero-Stakes-PickEm' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test access checks and save behavior
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          node --test tests/picks-client.test.mjs
+      - name: Obtain temporary deployment credentials
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: arn:aws:iam::442426890475:role/PickEm-GitHub-Deploy
+          aws-region: us-east-2
+          allowed-account-ids: '442426890475'
+          role-duration-seconds: 900
+          role-session-name: PickEm-ApiDeploy
+          retry-max-attempts: 2
+      - name: Deploy and verify function
+        run: python3 backend/deploy_function.py

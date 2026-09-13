@@ -9,7 +9,7 @@ The existing website still uses its current local storage/Sheets behavior.
 - Execution role: `PickEm-ApiRuntime`, trusting only `lambda.amazonaws.com`.
 - Attach `runtime-permissions.json` to that execution role. Deployment must create
   the `/aws/lambda/SundayPickEm-Api` log group before invoking the function.
-- Package boto3 with the function for reproducible dependencies before deployment.
+- The function uses the boto3 SDK included in the AWS-managed Python 3.13 runtime.
 - Require `USER_POOL_ISSUER` and `APP_CLIENT_ID` environment variables matching Cognito.
 - API Gateway HTTP API routes: `GET /picks`, `PUT /picks/{eventId}`. Both must use
   a JWT authorizer with the expected issuer/client and an access-token scope.
