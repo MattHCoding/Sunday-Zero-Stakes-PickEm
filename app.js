@@ -23,6 +23,8 @@ const state = {
   maxWeeks: 18,
   liveEventIds: new Set(),
   refreshTimer: null,
+  requestId: 0,
+  selections: new Map(),
 };
 
 // ---- Status helpers: Final → Live → Upcoming, then start time
@@ -48,10 +50,11 @@ async function init(){
     // Detect current season/year/week
     const base = await fetchJSON("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
     const league = base?.leagues?.[0];
-    const currentSeason = league?.season;
+    const currentSeason = base?.season || league?.season;
     const currentWeek = league?.week?.number || base?.week?.number;
 
-    state.seasonYear = currentSeason?.year || new Date().getFullYear();
+    const now = new Date();
+    state.seasonYear = currentSeason?.year || (now.getMonth() < 2 ? now.getFullYear() - 1 : now.getFullYear());
 
     // Derive regular season max weeks if available
     const calendar = Array.isArray(league?.calendar) ? league.calendar : [];
@@ -61,7 +64,8 @@ async function init(){
     }
 
     // Clamp current week
-    state.week = clamp(currentWeek || 1, 1, state.maxWeeks);
+    const seasonType = Number(base?.season?.type || league?.season?.type?.type || 2);
+    state.week = clamp(seasonType === 2 ? (currentWeek || 1) : (seasonType === 1 ? 1 : state.maxWeeks), 1, state.maxWeeks);
 
     // Populate Week selector
     WEEK_SELECT.innerHTML = "";
@@ -96,13 +100,18 @@ async function init(){
 }
 
 async function loadWeek(){
+  const requestId = ++state.requestId;
   clearInterval(state.refreshTimer);
+  PREV_BTN.disabled = state.week <= 1;
+  NEXT_BTN.disabled = state.week >= state.maxWeeks;
   state.liveEventIds.clear();
   STATUS.textContent = `Loading Week ${state.week}…`;
   GRID.innerHTML = "";
 
   const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${state.seasonYear}&seasontype=${state.seasonType}&week=${state.week}&limit=1000`;
+  try {
   const data = await fetchJSON(url);
+  if (requestId !== state.requestId) return;
 
   const events = Array.isArray(data?.events) ? sortEvents(data.events) : [];
   if (!events.length){
@@ -113,9 +122,14 @@ async function loadWeek(){
   STATUS.textContent = `Showing ${events.length} game${events.length>1?"s":""} — Week ${state.week}`;
   renderEvents(events);
 
-  // Auto-refresh while there are live games (renderEvents fills liveEventIds)
-  if (state.liveEventIds.size){
+  // Refresh upcoming games too, so the page notices kickoff and updated lines.
+  if (events.some(event => getState(event) !== "post")){
     state.refreshTimer = setInterval(() => refreshLive(), AUTO_REFRESH_MS);
+  }
+  } catch (err) {
+    if (requestId !== state.requestId) return;
+    console.warn("Week load failed:", err);
+    STATUS.textContent = `Could not load Week ${state.week}. Tap refresh to retry.`;
   }
 }
 
@@ -208,16 +222,18 @@ function createCard(event){
   homeBtn.dataset.teamButtonName = readableTeamLabel(homeBtn);
 
   // Enable recording ONLY when upcoming
-  const canRecord = stateStr === "pre";
+  const canRecord = isPickOpen(event);
   awayBtn.disabled = !canRecord;
   homeBtn.disabled = !canRecord;
 
   if (canRecord) {
     awayBtn.addEventListener("click", () => {
+      if (!isPickOpen(event)) { loadWeek(); return; }
       applySelection(card, "away");
       recordPick(event, awayBtn.dataset.teamButtonName, "away");
     });
     homeBtn.addEventListener("click", () => {
+      if (!isPickOpen(event)) { loadWeek(); return; }
       applySelection(card, "home");
       recordPick(event, homeBtn.dataset.teamButtonName, "home");
     });
@@ -236,6 +252,7 @@ function createCard(event){
 
   for (const part of bodyParts) card.append(part);
   card.dataset.eventId = event.id;
+  applySelection(card, readSelection(event));
 
   return card;
 }
@@ -249,6 +266,9 @@ function readableTeamLabel(btn){
 }
 
 async function recordPick(event, teamButtonName, selectionHomeAway){
+  if (!isPickOpen(event)) return;
+  const stored = saveSelection(event, selectionHomeAway);
+  STATUS.textContent = stored ? "Pick saved on this device. Sending to Google Sheets…" : "Pick selected for this visit. Sending to Google Sheets…";
   const comp  = event?.competitions?.[0] || {};
   const cAway = comp?.competitors?.find(t => t.homeAway === "away") || comp?.competitors?.[0] || {};
   const cHome = comp?.competitors?.find(t => t.homeAway === "home") || comp?.competitors?.[1] || {};
@@ -269,7 +289,7 @@ async function recordPick(event, teamButtonName, selectionHomeAway){
     shortName:   event.shortName || "",
     seasonYear:  state.seasonYear,
     weekNumber:  state.week,
-    spread:      selectionHomeAway === "home" ? homeSpread : -homeSpread,                  // e.g., -3.5 if you picked the -3.5 favorite; +3.5 if you picked the dog
+    spread,
     homeTeam,
     awayTeam,
     selectionHomeAway: selectionHomeAway || "",       // "home" | "away"
@@ -283,9 +303,10 @@ async function recordPick(event, teamButtonName, selectionHomeAway){
       // DO NOT set headers; avoid JSON content-type to prevent preflight
       body: JSON.stringify(payload),
     });
-    // Optionally show a local toast like “Saved”
+    STATUS.textContent = stored ? "Pick saved on this device. Google Sheets submission sent; receipt cannot be confirmed." : "Google Sheets submission sent; receipt cannot be confirmed. Device storage unavailable.";
   } catch (err) {
     console.warn("Fire-and-forget failed (network-level):", err);
+    STATUS.textContent = stored ? "Pick saved on this device, but sending to Google Sheets failed. Tap your team to retry." : "Could not save this pick. Tap your team to retry.";
   }
 }
 
@@ -381,12 +402,14 @@ function buildLineScoreTable(competition){
 }
 
 async function refreshLive(){
+  const requestId = ++state.requestId;
   try{
     const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${state.seasonYear}&seasontype=${state.seasonType}&week=${state.week}&limit=1000`;
     const data = await fetchJSON(url);
+    if (requestId !== state.requestId) return;
     const events = Array.isArray(data?.events) ? sortEvents(data.events) : [];
     renderEvents(events);
-    if (!state.liveEventIds.size){
+    if (!events.some(event => getState(event) !== "post")){
       clearInterval(state.refreshTimer);
     }
   }catch(err){
@@ -412,7 +435,10 @@ function teamCity(team){
   return team?.location || team?.city || ""; // ESPN usually provides 'location'
 }
 function parseHomeSpread(competition){
-  const raw = competition?.odds?.[0]?.spread;
+  const odds = competition?.odds?.[0];
+  const raw = odds?.pointSpread?.home?.close?.line ?? odds?.spread;
+  if (raw == null || (typeof raw === "string" && !raw.trim())) return null;
+  if (typeof raw === "string" && /^(PK|PICK|EVEN)$/i.test(raw.trim())) return 0;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
@@ -442,4 +468,29 @@ function applySelection(cardEl, side){ // side: 'home' | 'away'
   home.setAttribute('aria-pressed', String(side === 'home'));
 
   cardEl.dataset.selectedSide = side; // optional: store for later
+}
+
+function isPickOpen(event){
+  const kickoff = Date.parse(event.date || event.competitions?.[0]?.date);
+  return getState(event) === "pre" && Number.isFinite(kickoff) && Date.now() < kickoff;
+}
+
+function selectionKey(event){
+  return `sunday-pickem:${state.seasonYear}:${event.id}`;
+}
+
+function readSelection(event){
+  const key = selectionKey(event);
+  let side = state.selections.get(key);
+  if (!side) {
+    try { side = localStorage.getItem(key); } catch (_) { /* Storage can be unavailable. */ }
+  }
+  return side === "home" || side === "away" ? side : "";
+}
+
+function saveSelection(event, side){
+  const key = selectionKey(event);
+  state.selections.set(key, side);
+  try { localStorage.setItem(key, side); return true; }
+  catch (_) { return false; }
 }
