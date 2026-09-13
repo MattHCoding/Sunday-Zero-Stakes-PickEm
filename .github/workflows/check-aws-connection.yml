@@ -1,0 +1,44 @@
+name: Check AWS connection
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/check-aws-connection.yml
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+jobs:
+  check:
+    if: github.repository == 'MattHCoding/Sunday-Zero-Stakes-PickEm' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Obtain temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: arn:aws:iam::442426890475:role/PickEm-GitHub-Deploy
+          aws-region: us-east-2
+          allowed-account-ids: "442426890475"
+          role-duration-seconds: 900
+          role-session-name: PickEm-ConnectionCheck
+          retry-max-attempts: 2
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"sts:GetCallerIdentity","Resource":"*"}]}
+      - name: Verify the expected account and role
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --output json > /tmp/pickem-identity.json
+          python3 - <<'PY'
+          import json
+          with open("/tmp/pickem-identity.json") as handle:
+              identity = json.load(handle)
+          assert identity["Account"] == "442426890475", "Unexpected AWS account"
+          assert identity["Arn"].startswith(
+              "arn:aws:sts::442426890475:assumed-role/PickEm-GitHub-Deploy/"
+          ), "Unexpected AWS role"
+          print("AWS connection verified: PickEm-GitHub-Deploy, region us-east-2.")
+          PY
