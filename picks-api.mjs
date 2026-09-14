@@ -1,4 +1,9 @@
-// Authenticated API adapter. Wire into app.js after the API and sign-in are deployed.
+import { awsConfig } from './aws-config.mjs';
+
+// Sign-in must supply a current Cognito access token.
+export function createAppPicksApi(getAccessToken) {
+  return createPicksApi({ baseUrl: awsConfig.apiUrl, getAccessToken });
+}
 export function createPicksApi({ baseUrl, getAccessToken, fetchImpl = fetch }) {
   const origin = new URL(baseUrl);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) {

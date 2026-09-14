@@ -1,30 +1,21 @@
-# Picks API — prepared, not deployed
+# Picks API
 
-The existing website still uses its current local storage/Sheets behavior.
-`picks-api.mjs` is an adapter prepared for integration after deployment and sign-in.
+The protected API and Cognito account service are deployed in us-east-2.
+Public application identifiers are in `aws-config.mjs`.
+`createAppPicksApi(getAccessToken)` configures the authenticated adapter.
 
-## Deployment contract
+The website saves picks on the device only. Google Sheets submission has been
+removed. Sign-in and authenticated frontend save/load integration remain pending.
+No accounts have been created; authenticated end-to-end saving is not yet tested.
+Existing device picks are preserved and are not automatically uploaded.
 
-- Lambda name: `SundayPickEm-Api`; region: `us-east-2`; Python handler: `handler.handler`.
-- Execution role: `PickEm-ApiRuntime`, trusting only `lambda.amazonaws.com`.
-- Attach `runtime-permissions.json` to that execution role. Deployment must create
-  the `/aws/lambda/SundayPickEm-Api` log group before invoking the function.
-- The function uses the boto3 SDK included in the AWS-managed Python 3.13 runtime.
-- Require `USER_POOL_ISSUER` and `APP_CLIENT_ID` environment variables matching Cognito.
-- API Gateway HTTP API routes: `GET /picks`, `PUT /picks/{eventId}`. Both must use
-  a JWT authorizer with the expected issuer/client and an access-token scope.
-- Lambda invoke permission must be limited to this API's execution ARN/account.
-- Configure API Gateway CORS for `https://matthcoding.github.io`, methods GET/PUT,
-  and headers Authorization/Content-Type. CORS does not provide authentication.
-- Never deploy a public unauthenticated function URL.
+CloudShell setup verified that unauthenticated GET and PUT requests return 401.
+Both routes require Cognito access tokens. Lambda derives the user from the JWT
+authorizer and verifies the issuer and client. DynamoDB picks are scoped by user.
+The server obtains current lines and kickoff times from ESPN and rejects late
+picks, missing lines, and client-supplied identity or spread values.
 
-The API obtains user identity from the authorizer and reads the current schedule,
-spread, and kickoff from ESPN. Client-supplied identity, line, and kickoff values
-are rejected. Missing odds fail closed. Stored picks remain readable after kickoff.
-Users can change picks before kickoff; each accepted change stores the current line.
-Picks use userId as partition key and `season#week#eventId` as sort key, with a
-zero-padded two-digit week. Permission to read other users' picks is not exposed.
-
-The existing GitHub deployment role cannot create IAM roles, Lambda functions,
-Cognito pools, or HTTP APIs. Those permissions/resources must be arranged before
-deployment. Its current database setup policy is not sufficient.
+GitHub Actions deploys SundayPickEm-Api through the PickEm-GitHub-Deploy role.
+Its IAM permissions allow passing only PickEm-ApiRuntime. Cognito and HTTP API
+resources were created through the CloudShell bootstrap script.
+No long-lived AWS keys are stored in the website.

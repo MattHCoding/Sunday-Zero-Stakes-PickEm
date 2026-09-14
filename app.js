@@ -9,9 +9,6 @@ const PREV_BTN = document.getElementById("prevWeek");
 const NEXT_BTN = document.getElementById("nextWeek");
 const REFRESH_BTN = document.getElementById("refreshBtn");
 const SEASON_LABEL = document.getElementById("seasonLabel");
-const SHEETS_URL   = "https://script.google.com/macros/s/AKfycbyJaemnLbVd-3YzPSHZMcXkl_Sgc-WnPwAONQhHO-er0AZTymkegU-iT9MHKtt-rbLc/exec";
-const SHEETS_TOKEN = "CHANGE_ME_SHARED_SECRET";
-
 // Tunables
 const DEFAULT_SEASON_TYPE = 2; // 1=Pre, 2=Reg, 3=Post
 const AUTO_REFRESH_MS = 30000; // 30s live refresh
@@ -268,46 +265,9 @@ function readableTeamLabel(btn){
 async function recordPick(event, teamButtonName, selectionHomeAway){
   if (!isPickOpen(event)) return;
   const stored = saveSelection(event, selectionHomeAway);
-  STATUS.textContent = stored ? "Pick saved on this device. Sending to Google Sheets…" : "Pick selected for this visit. Sending to Google Sheets…";
-  const comp  = event?.competitions?.[0] || {};
-  const cAway = comp?.competitors?.find(t => t.homeAway === "away") || comp?.competitors?.[0] || {};
-  const cHome = comp?.competitors?.find(t => t.homeAway === "home") || comp?.competitors?.[1] || {};
-
-  const homeTeam = cHome?.team?.abbreviation || cHome?.team?.shortDisplayName || cHome?.team?.name || "";
-  const awayTeam = cAway?.team?.abbreviation || cAway?.team?.shortDisplayName || cAway?.team?.name || "";
-
-  const homeSpread = parseHomeSpread(comp); // number or null
-
-  // If you picked HOME, spread is homeSpread; if AWAY, flip the sign; null if no odds
-  const spread = (homeSpread == null) ? null
-               : (selectionHomeAway === "home" ? homeSpread : -homeSpread);
-
-  const payload = {
-    token:       SHEETS_TOKEN,
-    eventId:     event.id || "",
-    eventName:   event.name || event.shortName || comp.name || "",
-    shortName:   event.shortName || "",
-    seasonYear:  state.seasonYear,
-    weekNumber:  state.week,
-    spread,
-    homeTeam,
-    awayTeam,
-    selectionHomeAway: selectionHomeAway || "",       // "home" | "away"
-    teamButtonName: selectionHomeAway === "home" ? homeTeam : awayTeam
-  };
-
-  try {
-    await fetch(SHEETS_URL, {
-      method: "POST",
-      mode: "no-cors",          // <- key change
-      // DO NOT set headers; avoid JSON content-type to prevent preflight
-      body: JSON.stringify(payload),
-    });
-    STATUS.textContent = stored ? "Pick saved on this device. Google Sheets submission sent; receipt cannot be confirmed." : "Google Sheets submission sent; receipt cannot be confirmed. Device storage unavailable.";
-  } catch (err) {
-    console.warn("Fire-and-forget failed (network-level):", err);
-    STATUS.textContent = stored ? "Pick saved on this device, but sending to Google Sheets failed. Tap your team to retry." : "Could not save this pick. Tap your team to retry.";
-  }
+  STATUS.textContent = stored
+    ? "Pick saved on this device. Cloud saving will be available after sign-in is added."
+    : "Pick selected for this visit only. Device storage is unavailable.";
 }
 
 
