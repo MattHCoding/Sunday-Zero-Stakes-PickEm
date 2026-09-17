@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
+const storage = new Map();
+globalThis.sessionStorage = { getItem: k => storage.get(k), setItem: (k,v) => storage.set(k,v), removeItem: k => storage.delete(k) };
+Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
+globalThis.location = { search: '', pathname: '/', assign(url) { this.destination = url; } };
+globalThis.history = { replaceState() {} };
+const auth = await import('../auth.mjs');
+test('PKCE, state validation and expiry keep tokens out of persistent storage', async () => {
+  await auth.signIn();
+  const url = new URL(location.destination);
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
+  const transaction = JSON.parse(storage.get('pickem-oauth-transaction'));
+  const expected = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(transaction.verifier))).toString('base64url');
+  assert.equal(url.searchParams.get('code_challenge'), expected);
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw Error('must not fetch'); };
+  location.search = '?code=stolen&state=wrong';
+  await assert.rejects(auth.finishSignIn(), /verified/);
+  assert.equal(requests, 0);
+  assert.equal(auth.getSession(), null);
+  await auth.signIn();
+  const second = JSON.parse(storage.get('pickem-oauth-transaction'));
+  location.search = `?code=valid&state=${second.state}`;
+  const claims = { sub: 'test-user', token_use: 'access', iss: 'https://cognito-idp.us-east-2.amazonaws.com/us-east-2_AstbKn1rW', client_id: '2svq1psmqe1h7p4jknttt3t14j', exp: Math.floor(Date.now()/1000)+60 };
+  globalThis.fetch = async (_, options) => {
+    assert.equal(options.body.get('code_verifier'), second.verifier);
+    return { ok: true, json: async () => ({ access_token: `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature` }) };
+  };
+  await auth.finishSignIn();
+  assert.equal(auth.getSession().userId, 'test-user');
+  assert.equal(storage.size, 0);
+  const now = Date.now;
+  Date.now = () => now()+120000;
+  assert.equal(auth.getAccessToken(), null);
+  Date.now = now;
+});

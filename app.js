@@ -1,3 +1,16 @@
+import { finishSignIn, signIn, signOut, getSession, getAccessToken } from './auth.mjs';
+import { createAppPicksApi } from './picks-api.mjs';
+const cloudApi = createAppPicksApi(getAccessToken);
+let accountMode = false;
+let cloudReady = false;
+let saving = false;
+const cloudSelections = new Map();
+const ACCOUNT_STATUS = document.getElementById('accountStatus');
+const SIGN_IN = document.getElementById('signIn');
+const SIGN_OUT = document.getElementById('signOut');
+SIGN_IN.addEventListener('click', () => signIn().catch(() => { ACCOUNT_STATUS.textContent = 'Could not start sign-in. Check that browser storage is enabled.'; }));
+SIGN_OUT.addEventListener('click', signOut);
+
 // app.js — NFL Schedule (ESPN unofficial API)
 // Features: Light-theme friendly, status headers (Final/Live/Upcoming), outlines per state,
 // sort by status then kickoff time, auto-refreshes while games are LIVE.
@@ -43,6 +56,12 @@ init();
 
 async function init(){
   try{
+    try { await finishSignIn(); }
+    catch (error) { ACCOUNT_STATUS.textContent = error.message; }
+    accountMode = !!getSession();
+    SIGN_IN.hidden = accountMode;
+    SIGN_OUT.hidden = !accountMode;
+    if (accountMode) ACCOUNT_STATUS.textContent = 'Signed in. Loading your cloud picks…';
     STATUS.textContent = "Loading current week…";
     // Detect current season/year/week
     const base = await fetchJSON("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
@@ -97,6 +116,8 @@ async function init(){
 }
 
 async function loadWeek(){
+  if (saving) return;
+  cloudReady = false;
   const requestId = ++state.requestId;
   clearInterval(state.refreshTimer);
   PREV_BTN.disabled = state.week <= 1;
@@ -110,6 +131,20 @@ async function loadWeek(){
   const data = await fetchJSON(url);
   if (requestId !== state.requestId) return;
 
+  if (accountMode) {
+    try {
+      const picks = await cloudApi.listPicks(state.seasonYear, state.week);
+      if (requestId !== state.requestId) return;
+      cloudSelections.clear();
+      for (const pick of picks) cloudSelections.set(String(pick.eventId), pick.selectionHomeAway);
+      cloudReady = true;
+      ACCOUNT_STATUS.textContent = 'Signed in. Picks save to your account.';
+    } catch (error) {
+      if (requestId !== state.requestId) return;
+      cloudSelections.clear();
+      ACCOUNT_STATUS.textContent = 'Could not load cloud picks. Refresh to retry, or sign out and sign in again.';
+    }
+  }
   const events = Array.isArray(data?.events) ? sortEvents(data.events) : [];
   if (!events.length){
     STATUS.textContent = `No games found for Week ${state.week}.`;
@@ -219,18 +254,18 @@ function createCard(event){
   homeBtn.dataset.teamButtonName = readableTeamLabel(homeBtn);
 
   // Enable recording ONLY when upcoming
-  const canRecord = isPickOpen(event);
+  const canRecord = isPickOpen(event) && !saving && (!accountMode || (cloudReady && !!getSession()));
   awayBtn.disabled = !canRecord;
   homeBtn.disabled = !canRecord;
 
   if (canRecord) {
     awayBtn.addEventListener("click", () => {
-      if (!isPickOpen(event)) { loadWeek(); return; }
+      if (!isPickOpen(event) || saving || (accountMode && (!cloudReady || !getSession()))) { loadWeek(); return; }
       applySelection(card, "away");
       recordPick(event, awayBtn.dataset.teamButtonName, "away");
     });
     homeBtn.addEventListener("click", () => {
-      if (!isPickOpen(event)) { loadWeek(); return; }
+      if (!isPickOpen(event) || saving || (accountMode && (!cloudReady || !getSession()))) { loadWeek(); return; }
       applySelection(card, "home");
       recordPick(event, homeBtn.dataset.teamButtonName, "home");
     });
@@ -263,11 +298,35 @@ function readableTeamLabel(btn){
 }
 
 async function recordPick(event, teamButtonName, selectionHomeAway){
-  if (!isPickOpen(event)) return;
-  const stored = saveSelection(event, selectionHomeAway);
-  STATUS.textContent = stored
-    ? "Pick saved on this device. Cloud saving will be available after sign-in is added."
-    : "Pick selected for this visit only. Device storage is unavailable.";
+  if (!isPickOpen(event) || saving) return;
+  if (!accountMode) {
+    const stored = saveSelection(event, selectionHomeAway);
+    STATUS.textContent = stored ? 'Pick saved on this device only. Sign in for cloud saving.' : 'Pick selected for this visit only. Device storage is unavailable.';
+    return;
+  }
+  if (!cloudReady || !getSession()) {
+    ACCOUNT_STATUS.textContent = 'Please sign out and sign in again to save picks.';
+    return;
+  }
+  saving = true;
+  const period = { seasonYear: state.seasonYear, weekNumber: state.week };
+  for (const button of document.querySelectorAll('.team-btn')) button.disabled = true;
+  WEEK_SELECT.disabled = PREV_BTN.disabled = NEXT_BTN.disabled = REFRESH_BTN.disabled = true;
+  STATUS.textContent = 'Saving pick to your account…';
+  try {
+    const pick = await cloudApi.savePick({ eventId: event.id, ...period, selectionHomeAway });
+    cloudSelections.set(String(event.id), pick.selectionHomeAway);
+    STATUS.textContent = 'Pick saved to your account.';
+  } catch (error) {
+    STATUS.textContent = `Cloud save was not confirmed: ${error.message} Refresh before retrying.`;
+    cloudReady = false;
+  } finally {
+    saving = false;
+    WEEK_SELECT.disabled = REFRESH_BTN.disabled = false;
+    PREV_BTN.disabled = state.week <= 1;
+    NEXT_BTN.disabled = state.week >= state.maxWeeks;
+    await refreshLive();
+  }
 }
 
 
@@ -362,6 +421,7 @@ function buildLineScoreTable(competition){
 }
 
 async function refreshLive(){
+  if (saving) return;
   const requestId = ++state.requestId;
   try{
     const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${state.seasonYear}&seasontype=${state.seasonType}&week=${state.week}&limit=1000`;
@@ -440,6 +500,7 @@ function selectionKey(event){
 }
 
 function readSelection(event){
+  if (accountMode) return cloudSelections.get(String(event.id)) || "";
   const key = selectionKey(event);
   let side = state.selections.get(key);
   if (!side) {
@@ -454,3 +515,4 @@ function saveSelection(event, side){
   try { localStorage.setItem(key, side); return true; }
   catch (_) { return false; }
 }
+

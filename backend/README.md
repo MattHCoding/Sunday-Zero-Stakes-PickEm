@@ -1,21 +1,32 @@
-# Picks API
+# Sign-in and cloud picks — prepared for activation
 
-The protected API and Cognito account service are deployed in us-east-2.
-Public application identifiers are in `aws-config.mjs`.
-`createAppPicksApi(getAccessToken)` configures the authenticated adapter.
+The `activate-cloud-sign-in` branch implements Cognito hosted sign-in with
+OAuth authorization code + PKCE, state validation and a ten-minute transaction
+lifetime. Tokens stay in memory and expire after one hour. Reloading requires
+sign-in again; Cognito can reuse its login session. Passwords are entered only
+on the AWS-hosted page. No AWS credentials are shipped to browsers.
 
-The website saves picks on the device only. Google Sheets submission has been
-removed. Sign-in and authenticated frontend save/load integration remain pending.
-No accounts have been created; authenticated end-to-end saving is not yet tested.
-Existing device picks are preserved and are not automatically uploaded.
+Signed-in picks load from the protected API and save only after server confirmation.
+Guest device picks remain separate and are never automatically uploaded. Save
+failures require a refresh before another attempt, resolving ambiguous network
+outcomes. Signed-in picks are not cached in local storage.
 
-CloudShell setup verified that unauthenticated GET and PUT requests return 401.
-Both routes require Cognito access tokens. Lambda derives the user from the JWT
-authorizer and verifies the issuer and client. DynamoDB picks are scoped by user.
-The server obtains current lines and kickoff times from ESPN and rejects late
-picks, missing lines, and client-supplied identity or spread values.
+## Remaining activation steps
 
-GitHub Actions deploys SundayPickEm-Api through the PickEm-GitHub-Deploy role.
-Its IAM permissions allow passing only PickEm-ApiRuntime. Cognito and HTTP API
-resources were created through the CloudShell bootstrap script.
-No long-lived AWS keys are stored in the website.
+1. Run `python3 backend/enable-sign-in.py` in AWS CloudShell in account
+   442426890475. This adds the hosted sign-in domain to the existing pool without
+   changing picks or sending invitations. GitHub's deployment role does not have
+   Cognito administration permissions.
+2. Create the owner's account in Cognito pool `us-east-2_AstbKn1rW` using the
+   AWS console. Choose the owner's email and deliver the temporary password
+   privately. Do not post credentials in GitHub or chat. No account exists yet.
+3. Verify that the hosted sign-in page is available, then merge this branch to main.
+4. Sign in, change the temporary password, save an upcoming-game pick, then sign
+   in from another browser and confirm it loads. This authenticated end-to-end
+   check remains pending until the domain and account exist.
+
+The API and database were already deployed in us-east-2. Both GET and PUT require
+Cognito access tokens; unauthenticated calls returned 401 in the bootstrap check.
+API Gateway verifies JWTs and Lambda validates issuer/client/token type. The
+server derives user identity, kickoff and current spread; it rejects late picks
+and unavailable odds. Existing deployment permissions are unchanged.

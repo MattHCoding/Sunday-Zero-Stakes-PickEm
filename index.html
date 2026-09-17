@@ -26,7 +26,11 @@
 
   <main>
     <div id="statusBar" class="status-bar">Loading…</div>
-    <p class="status-bar">Picks currently save on this device only. Account sign-in and cloud saving are coming next.</p>
+    <div class="status-bar">
+      <p id="accountStatus" role="status">Picks save on this device only until you sign in. Existing device picks are not uploaded automatically.</p>
+      <button id="signIn" class="nav-btn" type="button">Sign in</button>
+      <button id="signOut" class="nav-btn" type="button" hidden>Sign out</button>
+    </div>
     <section id="grid" class="grid"></section>
   </main>
 
@@ -38,3 +42,4 @@
   <script src="app.js" type="module"></script>
 </body>
 </html>
+
