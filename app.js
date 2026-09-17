@@ -1,3 +1,4 @@
+import { connectAnalysis } from './analysis.mjs';
 import { finishSignIn, signIn, signOut, getSession, getAccessToken } from './auth.mjs';
 import { createAppPicksApi } from './picks-api.mjs';
 const cloudApi = createAppPicksApi(getAccessToken);
@@ -59,6 +60,7 @@ async function init(){
     try { await finishSignIn(); }
     catch (error) { ACCOUNT_STATUS.textContent = error.message; }
     accountMode = !!getSession();
+    connectAnalysis(getAccessToken);
     SIGN_IN.hidden = accountMode;
     SIGN_OUT.hidden = !accountMode;
     if (accountMode) ACCOUNT_STATUS.textContent = 'Signed in. Loading your cloud picks…';
