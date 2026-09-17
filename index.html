@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>NFL Schedule — Apple-like Panels</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="analysis.css" />
 </head>
 <body>
   <header class="app-header">
@@ -24,12 +25,15 @@
     </div>
   </header>
 
-  <main>
+  <nav class="view-nav" aria-label="Website views"><button id="picksTab" aria-pressed="true" type="button">Picks</button><button id="analysisTab" aria-pressed="false" type="button">Analysis</button></nav>
+  <main id="picksView">
     <div id="statusBar" class="status-bar">Loading…</div>
     <p class="status-bar">Picks currently save on this device only. Account sign-in and cloud saving are coming next.</p>
     <section id="grid" class="grid"></section>
   </main>
 
+  <section id="analysisView" class="analysis" hidden aria-label="Pick analysis"></section>
+  <script type="module" src="analysis.mjs"></script>
   <footer class="app-footer">
     <span id="seasonLabel"></span>
     <span>• Data from ESPN (unofficial endpoints)</span>
@@ -38,3 +42,4 @@
   <script src="app.js" type="module"></script>
 </body>
 </html>
+
